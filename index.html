@@ -8,44 +8,39 @@
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #87CEEB; /* Sky blue */
+            background-color: #87CEEB;
             font-family: 'Courier New', Courier, monospace;
+            user-select: none;
         }
-        #ui-container {
+        canvas {
+            display: block;
+        }
+        #ui {
             position: absolute;
-            top: 10px;
-            left: 10px;
+            top: 20px;
+            left: 20px;
             color: white;
             text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
-            z-index: 10;
             pointer-events: none;
+            z-index: 10;
         }
-        h1 { margin: 0 0 10px 0; font-size: 24px; color: #f1c40f; }
-        .hud-stat { font-size: 20px; margin-bottom: 5px; font-weight: bold; }
-        #instructions {
+        #ui h1 { margin: 0 0 10px 0; font-size: 24px; color: #ffcc00;}
+        .stat { font-size: 18px; margin-bottom: 5px; font-weight: bold; }
+        
+        #controls-help {
             position: absolute;
             bottom: 20px;
             left: 20px;
-            color: white;
+            color: rgba(255, 255, 255, 0.8);
             background: rgba(0, 0, 0, 0.5);
             padding: 15px;
             border-radius: 8px;
-            font-size: 14px;
             pointer-events: none;
+            font-size: 14px;
+            line-height: 1.5;
+            z-index: 10;
         }
-        #instructions ul { margin: 5px 0 0 0; padding-left: 20px; }
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            font-size: 24px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 20px 40px;
-            border-radius: 10px;
-            z-index: 20;
-        }
+        
         #crosshair {
             position: absolute;
             top: 50%;
@@ -53,543 +48,591 @@
             width: 20px;
             height: 20px;
             transform: translate(-50%, -50%);
-            border: 2px solid rgba(255, 255, 255, 0.5);
-            border-radius: 50%;
             pointer-events: none;
+            z-index: 10;
         }
-        #crosshair::after {
+        #crosshair::before, #crosshair::after {
             content: '';
             position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 4px;
-            height: 4px;
-            background: rgba(255, 255, 255, 0.5);
-            transform: translate(-50%, -50%);
-            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.6);
+        }
+        #crosshair::before { top: 9px; left: 0; width: 20px; height: 2px; }
+        #crosshair::after { top: 0; left: 9px; width: 2px; height: 20px; }
+
+        #minimap-border {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 200px;
+            height: 200px;
+            border: 3px solid rgba(255, 255, 255, 0.5);
+            border-radius: 8px;
+            pointer-events: none;
+            z-index: 10;
+            box-sizing: border-box;
         }
     </style>
-    <!-- Import Maps for Three.js -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
-    <div id="ui-container">
-        <h1>Flight Simulator</h1>
-        <div class="hud-stat" id="scoreDisplay">Score: 0</div>
-        <div class="hud-stat" id="speedDisplay">Speed: 0 km/h</div>
+
+    <div id="ui">
+        <h1>LOW POLY FLIGHT</h1>
+        <div class="stat">SCORE: <span id="score">0</span></div>
+        <div class="stat" style="color: #ff4444;">BOOST: <span id="boost">0</span>%</div>
+        <div class="stat">SPEED: <span id="speedDisplay">0</span></div>
     </div>
-    
+
+    <div id="controls-help">
+        <b>Controls:</b><br>
+        [Space] Throttle | [Shift] Boost<br>
+        [W/S] Pitch | [A/D] Roll<br>
+        [Q/E] Barrel Roll | [R] Immelman Turn<br>
+        [Left Click] Shoot | [Right Click + Drag] Free Look
+    </div>
+
     <div id="crosshair"></div>
+    <div id="minimap-border"></div>
 
-    <div id="instructions">
-        <strong>Controls:</strong>
-        <ul>
-            <li><b>Spacebar:</b> Throttle (Accelerate)</li>
-            <li><b>W / S:</b> Pitch Down / Up</li>
-            <li><b>A / D:</b> Roll Left / Right</li>
-            <li><b>Q / E:</b> Barrel Roll Left / Right</li>
-            <li><b>R:</b> Immelman Turn (Reverse Direction)</li>
-        </ul>
-    </div>
+    <script>
+        // --- Initialization ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 200, 3000);
 
-    <div id="loading">Loading assets...</div>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-
-        // --- GAME VARIABLES ---
-        let scene, camera, renderer;
-        let playerGroup; // Holds the airplane model
-        let clock = new THREE.Clock();
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 5000);
+        camera.position.set(0, 11, 18); // Initialize camera position above ground
         
-        // Physics & State
-        let speed = 0;
-        const maxSpeed = 150;
-        const acceleration = 40;
-        const deceleration = 15;
-        const minFlightSpeed = 40;
-        let isCrashed = false;
-        let score = 0;
+        // Minimap Camera setup
+        const mapSize = 200;
+        const minimapCamera = new THREE.OrthographicCamera(-300, 300, 300, -300, 1, 2000);
+        minimapCamera.position.y = 1000;
+        minimapCamera.up.set(0, 0, -1); // Fix gimbal lock for top-down view
+        minimapCamera.lookAt(0, 0, 0);
 
-        // Inputs
-        const keys = { w: false, a: false, s: false, d: false, space: false };
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.autoClear = false; // Important for minimap rendering
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(500, 1000, 500);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -1000;
+        dirLight.shadow.camera.right = 1000;
+        dirLight.shadow.camera.top = 1000;
+        dirLight.shadow.camera.bottom = -1000;
+        dirLight.shadow.camera.far = 3000;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // --- Environment ---
+        const flatMaterial = (color) => new THREE.MeshLambertMaterial({ color: color, flatShading: true });
+
+        // Infinite Ground
+        const gridSize = 8000;
+        const gridDivisions = 200; // 40 units per cell
+        const groundGeo = new THREE.PlaneGeometry(gridSize, gridSize);
+        const ground = new THREE.Mesh(groundGeo, flatMaterial(0x4CAF50));
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Grid overlay
+        const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x2E7D32, 0x2E7D32);
+        gridHelper.position.y = 0.1;
+        gridHelper.material.opacity = 0.5;
+        gridHelper.material.transparent = true;
+        scene.add(gridHelper);
+
+        // Airstrip
+        const stripGeo = new THREE.PlaneGeometry(60, 600);
+        const strip = new THREE.Mesh(stripGeo, flatMaterial(0x555555));
+        strip.rotation.x = -Math.PI / 2;
+        strip.position.set(0, 0.5, -200);
+        strip.receiveShadow = true;
+        scene.add(strip);
+
+        // Airstrip lines
+        for(let i=0; i<15; i++) {
+            const line = new THREE.Mesh(new THREE.PlaneGeometry(2, 20), flatMaterial(0xFFEB3B));
+            line.rotation.x = -Math.PI / 2;
+            line.position.set(0, 0.6, -20 - (i * 40));
+            scene.add(line);
+        }
+
+        // Decor (Trees & Buildings)
+        const decorGroup = new THREE.Group();
+        scene.add(decorGroup);
+
+        function createTree(x, z) {
+            const tree = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 5, 5), flatMaterial(0x795548));
+            trunk.position.y = 2.5;
+            trunk.castShadow = true;
+            tree.add(trunk);
+            const leaves = new THREE.Mesh(new THREE.IcosahedronGeometry(4, 0), flatMaterial(0x2E7D32));
+            leaves.position.y = 6;
+            leaves.castShadow = true;
+            tree.add(leaves);
+            tree.position.set(x, 0, z);
+            decorGroup.add(tree);
+        }
+
+        function createBuilding(x, z) {
+            const width = 10 + Math.random() * 15;
+            const height = 10 + Math.random() * 30;
+            const depth = 10 + Math.random() * 15;
+            const bldg = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), flatMaterial(0x90A4AE));
+            bldg.position.set(x, height / 2, z);
+            bldg.castShadow = true;
+            bldg.receiveShadow = true;
+            decorGroup.add(bldg);
+        }
+
+        // Scatter decor
+        for(let i=0; i<300; i++) {
+            const x = (Math.random() - 0.5) * 4000;
+            const z = (Math.random() - 0.5) * 4000;
+            // Keep runway clear
+            if (Math.abs(x) < 100 && z < 100 && z > -800) continue;
+            
+            if (Math.random() > 0.3) createTree(x, z);
+            else createBuilding(x, z);
+        }
+
+        // --- Player Plane (Arwing Style) ---
+        const plane = new THREE.Group();
         
-        // Maneuvers (Q, E, R)
-        const maneuver = {
-            active: false,
-            type: null, // 'roll_left', 'roll_right', 'immelman'
-            progress: 0,
-            targetAngle: 0
-        };
+        // Central Fuselage
+        const noseGeo = new THREE.ConeGeometry(0.8, 4, 4);
+        noseGeo.rotateX(Math.PI / 2);
+        const nose = new THREE.Mesh(noseGeo, flatMaterial(0xEEEEEE));
+        nose.position.z = -2;
+        nose.castShadow = true;
+        plane.add(nose);
 
-        // Environment Arrays
+        const bodyGeo = new THREE.BoxGeometry(1.6, 1.2, 3);
+        const body = new THREE.Mesh(bodyGeo, flatMaterial(0x1976D2));
+        body.castShadow = true;
+        plane.add(body);
+
+        // Wings
+        const wingGeo = new THREE.ConeGeometry(4, 1.5, 3);
+        const wing = new THREE.Mesh(wingGeo, flatMaterial(0xEEEEEE));
+        wing.scale.set(1, 0.1, 1.5);
+        wing.position.set(0, 0, 0.5);
+        wing.castShadow = true;
+        plane.add(wing);
+
+        // Engine Pods
+        const podGeo = new THREE.BoxGeometry(0.8, 0.8, 2);
+        const podMat = flatMaterial(0x1976D2);
+        const leftPod = new THREE.Mesh(podGeo, podMat);
+        leftPod.position.set(-2.5, -0.2, 1);
+        leftPod.castShadow = true;
+        plane.add(leftPod);
+        const rightPod = new THREE.Mesh(podGeo, podMat);
+        rightPod.position.set(2.5, -0.2, 1);
+        rightPod.castShadow = true;
+        plane.add(rightPod);
+
+        // Engine Glow
+        const glowGeo = new THREE.PlaneGeometry(0.6, 0.6);
+        const glowMat = new THREE.MeshBasicMaterial({ color: 0x00FFFF, side: THREE.DoubleSide });
+        const leftGlow = new THREE.Mesh(glowGeo, glowMat);
+        leftGlow.position.set(-2.5, -0.2, 2.01);
+        plane.add(leftGlow);
+        const rightGlow = new THREE.Mesh(glowGeo, glowMat);
+        rightGlow.position.set(2.5, -0.2, 2.01);
+        plane.add(rightGlow);
+
+        plane.position.set(0, 5, 0); // Start on airstrip
+        scene.add(plane);
+
+        // --- Gameplay Objects ---
         const rings = [];
-        const ringRadius = 15;
-        let ringZSpawn = -300;
-
-        // UI Elements
-        const scoreEl = document.getElementById('scoreDisplay');
-        const speedEl = document.getElementById('speedDisplay');
-        const loadingEl = document.getElementById('loading');
-
-        init();
+        const targets = [];
+        const lasers = [];
         
-        function init() {
-            // 1. Scene Setup
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 300, 2000);
+        const ringGeo = new THREE.TorusGeometry(15, 1.5, 8, 16);
+        const ringMat = new THREE.MeshLambertMaterial({ color: 0xFFD700, emissive: 0x554400 });
+        
+        const targetGeo = new THREE.IcosahedronGeometry(4, 0);
+        const targetMat = new THREE.MeshLambertMaterial({ color: 0xFF3333, flatShading: true });
 
-            // 2. Camera Setup
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
-            
-            // 3. Renderer Setup
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            document.body.appendChild(renderer.domElement);
+        // Generate Obstacle Course
+        let courseZ = -800;
+        let courseX = 0;
+        let courseY = 30;
 
-            // 4. Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            scene.add(ambientLight);
+        for(let i=0; i<100; i++) {
+            courseZ -= 200 + Math.random() * 100;
+            courseX += (Math.random() - 0.5) * 200;
+            courseY += (Math.random() - 0.5) * 50;
+            courseY = Math.max(15, Math.min(courseY, 200)); // keep in bounds
 
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-            dirLight.position.set(100, 200, 50);
-            dirLight.castShadow = true;
-            dirLight.shadow.camera.top = 1000;
-            dirLight.shadow.camera.bottom = -1000;
-            dirLight.shadow.camera.left = -1000;
-            dirLight.shadow.camera.right = 1000;
-            dirLight.shadow.camera.near = 0.1;
-            dirLight.shadow.camera.far = 3000;
-            scene.add(dirLight);
-
-            // 5. Build Environment
-            buildEnvironment();
-
-            // 6. Setup Player/Airplane
-            playerGroup = new THREE.Group();
-            playerGroup.position.set(0, 2, 200); // Start on the runway
-            scene.add(playerGroup);
-            loadAirplane();
-
-            // 7. Initial Rings
-            for (let i = 0; i < 10; i++) {
-                spawnRing();
-            }
-
-            // 8. Event Listeners
-            window.addEventListener('resize', onWindowResize);
-            window.addEventListener('keydown', onKeyDown);
-            window.addEventListener('keyup', onKeyUp);
-
-            // Hide loading if placeholder is used instantly, but let's clear it in loadAirplane
-        }
-
-        function loadAirplane() {
-            const loader = new GLTFLoader();
-            // Attempt to load the user's Arwing.glb
-            loader.load(
-                'Arwing.glb',
-                function (gltf) {
-                    const model = gltf.scene;
-                    
-                    // Normalize model size and center it
-                    const box = new THREE.Box3().setFromObject(model);
-                    const center = box.getCenter(new THREE.Vector3());
-                    const size = box.getSize(new THREE.Vector3()).length();
-                    
-                    const desiredSize = 8;
-                    const scale = desiredSize / size;
-                    model.scale.setScalar(scale);
-                    
-                    // Center the model geometry based on bounding box
-                    model.position.sub(center.multiplyScalar(scale));
-                    
-                    // Some models face the wrong way, standard flight is -Z. 
-                    // Adjust this rotation if the Arwing flies backwards!
-                    model.rotation.y = Math.PI; 
-                    
-                    model.traverse((child) => {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                        }
-                    });
-
-                    // Add to a sub-group to maintain relative offsets
-                    const offsetGroup = new THREE.Group();
-                    offsetGroup.add(model);
-                    playerGroup.add(offsetGroup);
-                    
-                    loadingEl.style.display = 'none';
-                    animate();
-                },
-                undefined,
-                function (error) {
-                    console.warn("Could not load Arwing.glb. Using fallback procedural plane.", error);
-                    createFallbackAirplane();
-                    loadingEl.style.display = 'none';
-                    animate();
-                }
-            );
-        }
-
-        function createFallbackAirplane() {
-            // A simple geometric airplane if the GLB is missing
-            const mat = new THREE.MeshStandardMaterial({ color: 0xcccccc, flatShading: true });
-            const wingMat = new THREE.MeshStandardMaterial({ color: 0x3498db, flatShading: true });
-            const cockpitMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-
-            // Fuselage
-            const body = new THREE.Mesh(new THREE.ConeGeometry(1, 6, 8), mat);
-            body.rotation.x = Math.PI / 2;
-            
-            // Wings
-            const wings = new THREE.Mesh(new THREE.BoxGeometry(10, 0.2, 2), wingMat);
-            wings.position.set(0, 0, 1);
-
-            // Tail
-            const tail = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 1), wingMat);
-            tail.position.set(0, 0, 2.5);
-            
-            const fin = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.5, 1), wingMat);
-            fin.position.set(0, 0.75, 2.5);
-
-            // Cockpit
-            const cockpit = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1, 4, 8), cockpitMat);
-            cockpit.position.set(0, 0.5, -0.5);
-            cockpit.rotation.x = Math.PI / 2;
-
-            const plane = new THREE.Group();
-            plane.add(body, wings, tail, fin, cockpit);
-            
-            // Cast shadows
-            plane.traverse((child) => {
-                if (child.isMesh) child.castShadow = true;
-            });
-
-            playerGroup.add(plane);
-        }
-
-        function buildEnvironment() {
-            // Ground
-            const groundGeo = new THREE.PlaneGeometry(10000, 10000);
-            const groundMat = new THREE.MeshLambertMaterial({ color: 0x2d8a2d });
-            const ground = new THREE.Mesh(groundGeo, groundMat);
-            ground.rotation.x = -Math.PI / 2;
-            ground.receiveShadow = true;
-            scene.add(ground);
-
-            // Airstrip Base
-            const stripGeo = new THREE.PlaneGeometry(40, 600);
-            const stripMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
-            const strip = new THREE.Mesh(stripGeo, stripMat);
-            strip.rotation.x = -Math.PI / 2;
-            strip.position.y = 0.1;
-            strip.position.z = 0;
-            strip.receiveShadow = true;
-            scene.add(strip);
-
-            // Airstrip Lines
-            const lineGeo = new THREE.PlaneGeometry(2, 30);
-            const lineMat = new THREE.MeshBasicMaterial({ color: 0xe6c200 });
-            for (let i = -280; i < 280; i += 60) {
-                const line = new THREE.Mesh(lineGeo, lineMat);
-                line.rotation.x = -Math.PI / 2;
-                line.position.set(0, 0.2, i);
-                scene.add(line);
-            }
-
-            // Scatter Scenery (Trees and Buildings)
-            const treeGeoTrunk = new THREE.CylinderGeometry(1, 1.5, 4, 6);
-            const treeMatTrunk = new THREE.MeshLambertMaterial({ color: 0x5c4033, flatShading: true });
-            const treeGeoLeaves = new THREE.IcosahedronGeometry(4, 0);
-            const treeMatLeaves = new THREE.MeshLambertMaterial({ color: 0x1e5621, flatShading: true });
-            
-            const bldgMat = new THREE.MeshLambertMaterial({ color: 0x888888, flatShading: true });
-
-            for (let i = 0; i < 400; i++) {
-                // Random position avoiding the runway
-                let rx = (Math.random() - 0.5) * 4000;
-                let rz = (Math.random() - 0.5) * 4000;
-                
-                if (Math.abs(rx) < 50 && Math.abs(rz) < 400) {
-                    rx += (rx > 0 ? 50 : -50); // Push off runway
-                }
-
-                if (Math.random() > 0.3) {
-                    // Tree
-                    const tree = new THREE.Group();
-                    const trunk = new THREE.Mesh(treeGeoTrunk, treeMatTrunk);
-                    trunk.position.y = 2;
-                    trunk.castShadow = true;
-                    trunk.receiveShadow = true;
-
-                    const leaves = new THREE.Mesh(treeGeoLeaves, treeMatLeaves);
-                    leaves.position.y = 5 + Math.random() * 2;
-                    leaves.scale.setScalar(0.8 + Math.random() * 0.5);
-                    leaves.castShadow = true;
-                    leaves.receiveShadow = true;
-
-                    tree.add(trunk, leaves);
-                    tree.position.set(rx, 0, rz);
-                    scene.add(tree);
-                } else {
-                    // Building
-                    const bw = 10 + Math.random() * 20;
-                    const bh = 10 + Math.random() * 50;
-                    const bd = 10 + Math.random() * 20;
-                    const bGeo = new THREE.BoxGeometry(bw, bh, bd);
-                    const bldg = new THREE.Mesh(bGeo, bldgMat);
-                    bldg.position.set(rx, bh / 2, rz);
-                    bldg.castShadow = true;
-                    bldg.receiveShadow = true;
-                    scene.add(bldg);
-                }
-            }
-        }
-
-        function spawnRing() {
-            const geo = new THREE.TorusGeometry(ringRadius, 1.5, 8, 24);
-            const mat = new THREE.MeshBasicMaterial({ color: 0xf1c40f }); // Yellow
-            const ring = new THREE.Mesh(geo, mat);
-
-            // Path math - creates a snake-like path extending forward (-Z)
-            const rx = Math.sin(ringZSpawn * 0.005) * 150 + (Math.random() - 0.5) * 50;
-            // Altitude stays roughly between 30 and 150
-            const ry = 80 + Math.sin(ringZSpawn * 0.003) * 50 + (Math.random() - 0.5) * 20;
-            
-            ring.position.set(rx, ry, ringZSpawn);
-            
-            // Make rings face the general forward direction
-            ring.lookAt(new THREE.Vector3(rx, ry, ringZSpawn - 100));
-
+            // Add Ring
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.position.set(courseX, courseY, courseZ);
+            ring.lookAt(courseX, courseY, courseZ + 10);
             scene.add(ring);
-            rings.push({ mesh: ring, passed: false });
+            rings.push({ mesh: ring, active: true });
 
-            ringZSpawn -= 150; // Next ring further down the Z axis
-        }
-
-        // --- INPUT HANDLING ---
-        function onKeyDown(event) {
-            const k = event.key.toLowerCase();
-            if (keys.hasOwnProperty(k)) keys[k] = true;
-            if (event.code === 'Space') keys.space = true;
-
-            // Trigger Maneuvers if not already doing one
-            if (!maneuver.active && !isCrashed) {
-                if (k === 'q') startManeuver('roll_left');
-                if (k === 'e') startManeuver('roll_right');
-                if (k === 'r') startManeuver('immelman');
+            // Add Target nearby occasionally
+            if (Math.random() > 0.4) {
+                const target = new THREE.Mesh(targetGeo, targetMat);
+                target.position.set(
+                    courseX + (Math.random() - 0.5) * 80,
+                    courseY + (Math.random() - 0.5) * 40,
+                    courseZ + (Math.random() - 0.5) * 100
+                );
+                scene.add(target);
+                targets.push({ mesh: target, active: true });
             }
         }
 
-        function onKeyUp(event) {
-            const k = event.key.toLowerCase();
-            if (keys.hasOwnProperty(k)) keys[k] = false;
-            if (event.code === 'Space') keys.space = false;
-        }
+        // --- Variables & State ---
+        let speed = 0;
+        let maxSpeed = 3.0;
+        let currentBoost = 0;
+        let score = 0;
+        let velocityY = 0; // Added for gravity
+        
+        const keys = { w: false, a: false, s: false, d: false, space: false, shift: false };
+        let rightClickDown = false;
+        let freeLookYaw = 0;
+        let freeLookPitch = 0;
+        
+        let activeManeuver = null; // { type: 'rollLeft', progress: 0 }
 
-        function startManeuver(type) {
-            maneuver.active = true;
-            maneuver.type = type;
-            maneuver.progress = 0;
-            
-            if (type === 'roll_left' || type === 'roll_right') {
-                maneuver.targetAngle = Math.PI * 2; 
-            } else if (type === 'immelman') {
-                maneuver.targetAngle = Math.PI; // Phase 1 pitch, Phase 2 roll
+        // --- Input Handling ---
+        document.addEventListener('contextmenu', e => e.preventDefault());
+
+        document.addEventListener('keydown', e => {
+            const k = e.key.toLowerCase();
+            if (k === 'w') keys.w = true;
+            if (k === 's') keys.s = true;
+            if (k === 'a') keys.a = true;
+            if (k === 'd') keys.d = true;
+            if (k === ' ') { keys.space = true; e.preventDefault(); }
+            if (k === 'shift') keys.shift = true;
+
+            // Maneuvers
+            if (!activeManeuver) {
+                if (k === 'q') activeManeuver = { type: 'rollLeft', progress: 0 };
+                if (k === 'e') activeManeuver = { type: 'rollRight', progress: 0 };
+                if (k === 'r') activeManeuver = { type: 'immelman', progress: 0 };
             }
-        }
+        });
 
-        function resetGame() {
-            playerGroup.position.set(0, 2, 200);
-            playerGroup.rotation.set(0, 0, 0);
-            speed = 0;
-            score = 0;
-            scoreEl.innerText = `Score: ${score}`;
-            isCrashed = false;
-            maneuver.active = false;
+        document.addEventListener('keyup', e => {
+            const k = e.key.toLowerCase();
+            if (k === 'w') keys.w = false;
+            if (k === 's') keys.s = false;
+            if (k === 'a') keys.a = false;
+            if (k === 'd') keys.d = false;
+            if (k === ' ') keys.space = false;
+            if (k === 'shift') keys.shift = false;
+        });
+
+        document.addEventListener('mousedown', e => {
+            if (e.button === 2) {
+                rightClickDown = true;
+            } else if (e.button === 0) {
+                shootLaser();
+            }
+        });
+
+        document.addEventListener('mouseup', e => {
+            if (e.button === 2) {
+                rightClickDown = false;
+            }
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (rightClickDown) {
+                freeLookYaw -= e.movementX * 0.005;
+                freeLookPitch -= e.movementY * 0.005;
+                freeLookPitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, freeLookPitch));
+            }
+        });
+
+        function shootLaser() {
+            const laserGeo = new THREE.CylinderGeometry(0.2, 0.2, 10, 8);
+            laserGeo.rotateX(Math.PI / 2);
+            const laserMat = new THREE.MeshBasicMaterial({ color: 0x00FF00 });
             
-            // Reset Rings
-            rings.forEach(r => scene.remove(r.mesh));
-            rings.length = 0;
-            ringZSpawn = -300;
-            for (let i = 0; i < 10; i++) spawnRing();
+            // Left laser
+            const l1 = new THREE.Mesh(laserGeo, laserMat);
+            l1.position.copy(plane.position);
+            l1.translateX(-2.5); l1.translateY(-0.2); l1.translateZ(-1);
+            l1.quaternion.copy(plane.quaternion);
+            scene.add(l1);
+            lasers.push({ mesh: l1, life: 60 });
+
+            // Right laser
+            const l2 = new THREE.Mesh(laserGeo, laserMat);
+            l2.position.copy(plane.position);
+            l2.translateX(2.5); l2.translateY(-0.2); l2.translateZ(-1);
+            l2.quaternion.copy(plane.quaternion);
+            scene.add(l2);
+            lasers.push({ mesh: l2, life: 60 });
         }
 
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+        // --- UI Updates ---
+        const scoreEl = document.getElementById('score');
+        const boostEl = document.getElementById('boost');
+        const speedEl = document.getElementById('speedDisplay');
 
-        // --- MAIN LOOP ---
+        // --- Main Animation Loop ---
         function animate() {
             requestAnimationFrame(animate);
 
-            const delta = Math.min(clock.getDelta(), 0.1); // Cap delta to prevent huge jumps
-
-            if (isCrashed) {
-                // Wait for user to press space to restart
-                if (keys.space) resetGame();
-                renderer.render(scene, camera);
-                return;
-            }
-
-            // 1. Throttle & Speed
+            // 1. Throttle & Speed Logic
+            let targetSpeed = 0;
             if (keys.space) {
-                speed += acceleration * delta;
-            } else {
-                speed -= deceleration * delta;
-            }
-            speed = Math.max(0, Math.min(speed, maxSpeed));
-            
-            // Update UI
-            speedEl.innerText = `Speed: ${Math.floor(speed * 3.6)} km/h`; // ~km/h aesthetic
-
-            // 2. Flight Physics & Controls
-            if (maneuver.active) {
-                // Execute automated maneuvers
-                const mSpeed = 5; // rotation speed
-                const step = mSpeed * delta;
-                
-                if (maneuver.type === 'roll_left') {
-                    playerGroup.rotateZ(step);
-                    maneuver.progress += step;
-                    if (maneuver.progress >= maneuver.targetAngle) maneuver.active = false;
-                } 
-                else if (maneuver.type === 'roll_right') {
-                    playerGroup.rotateZ(-step);
-                    maneuver.progress += step;
-                    if (maneuver.progress >= maneuver.targetAngle) maneuver.active = false;
-                }
-                else if (maneuver.type === 'immelman') {
-                    // Immelman: Half Loop (Pitch Up 180), then Half Roll (Roll 180)
-                    if (maneuver.progress < Math.PI) {
-                        playerGroup.rotateX(step); // Pitch up
-                        maneuver.progress += step;
-                    } else if (maneuver.progress < Math.PI * 2) {
-                        playerGroup.rotateZ(step * 1.5); // Roll faster to level
-                        maneuver.progress += step * 1.5;
-                    } else {
-                        maneuver.active = false;
-                    }
-                }
-            } else {
-                // Manual Flight Controls
-                const turnSpeed = 1.5;
-                const pitchSpeed = 1.5;
-
-                // W/S - Pitch
-                if (keys.w) playerGroup.rotateX(-pitchSpeed * delta); // Nose down
-                if (keys.s) playerGroup.rotateX(pitchSpeed * delta);  // Nose up
-                
-                // A/D - Roll/Bank (which results in a turn in our arcade physics)
-                if (keys.a) {
-                    playerGroup.rotateZ(turnSpeed * delta);
-                    playerGroup.rotateY(turnSpeed * 0.5 * delta); // Add yaw for arcade turning
-                }
-                if (keys.d) {
-                    playerGroup.rotateZ(-turnSpeed * delta);
-                    playerGroup.rotateY(-turnSpeed * 0.5 * delta); // Add yaw
-                }
-                
-                // Auto-leveling roll slightly to make it easier for casual play
-                if (!keys.a && !keys.d) {
-                    const currentRoll = playerGroup.rotation.z;
-                    playerGroup.rotation.z -= currentRoll * 2 * delta;
-                }
-            }
-
-            // 3. Movement Forward
-            // Three.js local forward is -Z
-            playerGroup.translateZ(-speed * delta);
-
-            // 4. Gravity / Stall (If too slow in the air, plane drops)
-            if (playerGroup.position.y > 2 && speed < minFlightSpeed && !maneuver.active) {
-                playerGroup.position.y -= 20 * delta; // Fall down
-                playerGroup.rotateX(-0.5 * delta); // Nose drops
-            }
-
-            // 5. Ground Collision Check
-            if (playerGroup.position.y < 1) {
-                if (speed > minFlightSpeed && Math.abs(playerGroup.rotation.x) > 0.2) {
-                    // Crashed into ground!
-                    isCrashed = true;
-                    speedEl.innerText = "CRASHED! Press Space to Restart";
-                    speedEl.style.color = "red";
+                targetSpeed = maxSpeed;
+                if (keys.shift && currentBoost > 0) {
+                    targetSpeed = maxSpeed * 2.5;
+                    currentBoost -= 0.5; // Drain boost
+                    leftGlow.material.color.setHex(0xFF4400); // Orange when boosting
+                    rightGlow.material.color.setHex(0xFF4400);
                 } else {
-                    // Taxiing / Landed
-                    playerGroup.position.y = 1; 
-                    // Flatten out pitch/roll if landed safely
-                    playerGroup.rotation.x *= 0.9;
-                    playerGroup.rotation.z *= 0.9;
+                    leftGlow.material.color.setHex(0x00FFFF); // Normal cyan
+                    rightGlow.material.color.setHex(0x00FFFF);
                 }
             } else {
-                speedEl.style.color = "white";
+                leftGlow.material.color.setHex(0x002244); // Dim when not pressing gas
+                rightGlow.material.color.setHex(0x002244);
             }
 
-            // 6. Ring Collision & Spawning
+            // Smooth speed transition
+            speed += (targetSpeed - speed) * 0.05;
+            
+            // Calculate Lift and Gravity (Stalling)
+            // If speed is 0, lift is 0, gravity is max (simulating stall/falling)
+            // If speed >= 1.5, lift is 1 (no falling)
+            const lift = Math.min(speed / 1.5, 1.0);
+            const gravityForce = 0.15 * (1 - lift); 
+            velocityY -= gravityForce;
+
+            // Terminal downward velocity
+            if (velocityY < -2.0) velocityY = -2.0;
+
+            // Apply Movement
+            plane.translateZ(-speed);      // Local forward movement
+            plane.position.y += velocityY; // Global gravity
+
+            // Ground Collision prevention
+            if (plane.position.y < 2) {
+                plane.position.y = 2;
+                velocityY = Math.max(0, velocityY); // Reset downward velocity
+                // Level out pitch slightly if hitting ground
+                plane.rotation.x *= 0.9;
+                
+                // Add ground friction if not throttling
+                if (!keys.space) speed *= 0.95; 
+            }
+
+            // 2. Flight Controls (Pitch & Roll)
+            if (!activeManeuver) {
+                // Return to level roll smoothly if no input
+                if (!keys.a && !keys.d) {
+                     plane.rotateZ(-plane.rotation.z * 0.05); 
+                }
+
+                if (speed > 0.1) {
+                    // Increased turning speed and banking for tighter handling
+                    const rotationSpeed = 0.035 * (Math.min(speed / maxSpeed, 1.5));
+                    if (keys.w) plane.rotateX(-rotationSpeed); // Pitch down
+                    if (keys.s) plane.rotateX(rotationSpeed);  // Pitch up
+                    if (keys.a) { plane.rotateZ(rotationSpeed * 2.5); plane.rotateY(rotationSpeed * 1.2); } // Harder bank & yaw
+                    if (keys.d) { plane.rotateZ(-rotationSpeed * 2.5); plane.rotateY(-rotationSpeed * 1.2); }
+                }
+            } else {
+                // Handle Automated Maneuvers
+                if (activeManeuver.type === 'rollLeft') {
+                    plane.rotateZ(Math.PI * 2 / 30); // 360 deg over 30 frames
+                    activeManeuver.progress += 1/30;
+                } else if (activeManeuver.type === 'rollRight') {
+                    plane.rotateZ(-Math.PI * 2 / 30);
+                    activeManeuver.progress += 1/30;
+                } else if (activeManeuver.type === 'immelman') {
+                    // Immelman: Half loop (pitch up) then half roll
+                    if (activeManeuver.progress < 0.5) {
+                        plane.rotateX(Math.PI / 30); // 180 deg pitch over 30 frames
+                    } else {
+                        plane.rotateZ(Math.PI / 30); // 180 deg roll over 30 frames
+                    }
+                    activeManeuver.progress += 1/60;
+                }
+
+                if (activeManeuver.progress >= 1) {
+                    activeManeuver = null; // End maneuver
+                }
+            }
+
+            // 3. Update Lasers
+            for (let i = lasers.length - 1; i >= 0; i--) {
+                const l = lasers[i];
+                l.mesh.translateZ(-10); // Fast speed
+                l.life--;
+                
+                // Check Collision with Targets
+                for (let j = 0; j < targets.length; j++) {
+                    const t = targets[j];
+                    if (t.active && l.mesh.position.distanceTo(t.mesh.position) < 8) {
+                        // Hit target
+                        t.active = false;
+                        scene.remove(t.mesh);
+                        l.life = 0; // Destroy laser
+                        currentBoost = Math.min(100, currentBoost + 25);
+                        score += 50;
+                        break;
+                    }
+                }
+
+                if (l.life <= 0) {
+                    scene.remove(l.mesh);
+                    lasers.splice(i, 1);
+                }
+            }
+
+            // 4. Update Game Objects (Rings)
             for (let i = 0; i < rings.length; i++) {
-                const ring = rings[i];
-                if (!ring.passed) {
-                    const dist = playerGroup.position.distanceTo(ring.mesh.position);
-                    if (dist < ringRadius + 5) {
-                        ring.passed = true;
-                        ring.mesh.material.color.setHex(0x00ff00); // Turn green
-                        score += 100;
-                        scoreEl.innerText = `Score: ${score}`;
-                        
-                        // Spawn a new ring to keep the course infinite
-                        spawnRing();
+                const r = rings[i];
+                if (r.active && plane.position.distanceTo(r.mesh.position) < 18) {
+                    // Flew through ring
+                    r.active = false;
+                    r.mesh.material.color.setHex(0x00FF00); // Turn green
+                    score += 100;
+                }
+                if (r.active) {
+                    r.mesh.rotation.z += 0.01; // Spin rings slowly
+                }
+            }
+
+            // Make targets spin
+            for(let t of targets) {
+                if(t.active) {
+                    t.mesh.rotation.x += 0.02;
+                    t.mesh.rotation.y += 0.02;
+                }
+            }
+
+            // Infinite Environment Logic (Keep terrain, decor, rings moving with player)
+            const snap = gridSize / gridDivisions;
+            ground.position.x = Math.floor(plane.position.x / snap) * snap;
+            ground.position.z = Math.floor(plane.position.z / snap) * snap;
+            gridHelper.position.x = ground.position.x;
+            gridHelper.position.z = ground.position.z;
+
+            // Reposition Decor (Trees/Buildings) to create infinite forest/city
+            for(let i=0; i<decorGroup.children.length; i++) {
+                const obj = decorGroup.children[i];
+                if (plane.position.x - obj.position.x > 2000) obj.position.x += 4000;
+                if (plane.position.x - obj.position.x < -2000) obj.position.x -= 4000;
+                if (plane.position.z - obj.position.z > 2000) obj.position.z += 4000;
+                if (plane.position.z - obj.position.z < -2000) obj.position.z -= 4000;
+            }
+
+            // Reposition Rings & Targets to make infinite course
+            for(let r of rings) {
+                if (r.mesh.position.z > plane.position.z + 500) { // Passed far behind
+                    r.mesh.position.z -= 4000;
+                    r.mesh.position.x = plane.position.x + (Math.random() - 0.5) * 800;
+                    r.active = true;
+                    r.mesh.material.color.setHex(0xFFD700); // Reset color
+                }
+            }
+            for(let t of targets) {
+                if (t.mesh.position.z > plane.position.z + 500) {
+                    t.mesh.position.z -= 4000;
+                    t.mesh.position.x = plane.position.x + (Math.random() - 0.5) * 800;
+                    t.mesh.position.y = Math.max(15, plane.position.y + (Math.random() - 0.5) * 100);
+                    if (!t.active) {
+                        t.active = true;
+                        scene.add(t.mesh); // Re-add to scene if it was destroyed
                     }
                 }
             }
 
-            // Garbage collect passed rings way behind us
-            if (rings.length > 0) {
-                // If the player is > 200 units passed the first ring's Z position (taking orientation into account roughly)
-                const firstRing = rings[0].mesh;
-                const distToFirst = playerGroup.position.distanceTo(firstRing.position);
-                // Simple dot product check to see if it's behind us, or just raw distance + passed flag
-                if (rings[0].passed && distToFirst > 150) {
-                    scene.remove(rings[0].mesh);
-                    rings.shift();
-                }
+            // 5. Camera Follow Logic
+            if (!rightClickDown) {
+                // Interpolate free look angles back to 0
+                freeLookYaw += (0 - freeLookYaw) * 0.1;
+                freeLookPitch += (0 - freeLookPitch) * 0.1;
             }
 
-            // 7. Camera Tracking (Smooth Chase Cam)
-            // Desired camera position: Behind and slightly above the plane
-            const offset = new THREE.Vector3(0, 10, 30);
-            offset.applyQuaternion(playerGroup.quaternion);
-            offset.add(playerGroup.position);
+            // Calculate ideal camera position behind plane
+            const offset = new THREE.Vector3(0, 6, 18);
             
-            // Lerp camera position for smoothness
-            camera.position.lerp(offset, 0.1);
+            // Apply free look rotations to the offset
+            const lookQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(freeLookPitch, freeLookYaw, 0, 'YXZ'));
+            offset.applyQuaternion(lookQuat);
             
-            // Look slightly ahead of the plane
-            const lookTarget = new THREE.Vector3(0, 0, -20);
-            lookTarget.applyQuaternion(playerGroup.quaternion);
-            lookTarget.add(playerGroup.position);
+            // Apply plane's rotation to the offset
+            offset.applyQuaternion(plane.quaternion);
             
-            // Create a temporary object to hold the desired camera rotation, then slerp to it
-            const tempObj = new THREE.Object3D();
-            tempObj.position.copy(camera.position);
-            tempObj.lookAt(lookTarget);
-            camera.quaternion.slerp(tempObj.quaternion, 0.1);
+            const targetCamPos = plane.position.clone().add(offset);
+            camera.position.lerp(targetCamPos, 0.15); // Smooth follow
 
+            // Calculate ideal look-at point
+            const lookAtOffset = new THREE.Vector3(0, 0, -20);
+            lookAtOffset.applyQuaternion(lookQuat);
+            lookAtOffset.applyQuaternion(plane.quaternion);
+            const targetLookAt = plane.position.clone().add(lookAtOffset);
+            
+            camera.lookAt(targetLookAt);
+
+            // 6. UI Updates
+            scoreEl.innerText = score;
+            boostEl.innerText = Math.floor(currentBoost);
+            speedEl.innerText = Math.floor(speed * 100);
+
+            // 7. Rendering
+            renderer.clear();
+            
+            // Render main scene
+            renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
             renderer.render(scene, camera);
+
+            // Render Minimap
+            renderer.clearDepth(); // Prevents minimap objects from failing depth test
+            
+            minimapCamera.position.x = plane.position.x;
+            minimapCamera.position.z = plane.position.z;
+            minimapCamera.lookAt(plane.position.x, 0, plane.position.z);
+            
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            
+            // Use Scissor Test to prevent the minimap background from clearing the whole screen
+            renderer.setScissorTest(true);
+            renderer.setScissor(w - 220, 20, 200, 200);
+            renderer.setViewport(w - 220, 20, 200, 200); 
+            renderer.render(scene, minimapCamera);
+            renderer.setScissorTest(false);
         }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start loop
+        animate();
     </script>
 </body>
 </html>
